@@ -1,5 +1,22 @@
 import os
+import logging
 from stringcase import alphanumcase, snakecase
+from spotipy.exceptions import SpotifyException
+
+
+def paginated(func, next_page):
+    try:
+        page = func()
+        while page:
+            yield page
+            page = next_page(page) if page['next'] else None
+
+    except SpotifyException as e:
+        logger = logging.getLogger(__name__)
+        logger.error(
+            f"[Spotify] Could not fetch next page")
+        logger.error(e)
+        raise
 
 
 class Playlist(object):

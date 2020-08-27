@@ -1,18 +1,27 @@
 import os
 import sys
 import spotipy
+import logging
 from datetime import date
 from dotenv import load_dotenv
 from git import Repo
 from github import Github, GithubException
 from spotipy.oauth2 import SpotifyOAuth
-from playlist import Playlist
+from spotipy.exceptions import SpotifyException
+from util import paginated, Playlist
 
+handler = logging.StreamHandler(sys.stdout)
+handler.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
+# Load from .env
 load_dotenv()
+
 # Setup local repo from CWD
 repo_dir = os.environ['PLAYLIST_REPO_DIR']
-repo = Repo.init(os.environ['PLAYLIST_REPO_DIR'])
+repo = Repo.init(repo_dir)
 
 # Assert we have access to origin
 if 'origin' not in repo.remotes:
@@ -47,99 +56,92 @@ if log_batch_id not in origin.refs:
     repo.create_head(log_batch_id)
 repo.heads[log_batch_id].checkout()
 
-# Fetch list of playlists from Spotify
-scope = 'playlist-read-collaborative playlist-read-private user-library-read'
-auth_manager = SpotifyOAuth(client_id=os.environ['SPOTIFY_CLIENT_ID'],
-                            client_secret=os.environ['SPOTIFY_CLIENT_SECRET'],
-                            redirect_uri=os.environ['SPOTIFY_REDIRECT_URI'],
-                            username=os.environ['SPOTIFY_USERNAME'],
-                            scope=scope)
-spotify = spotipy.Spotify(auth_manager=auth_manager)
+# Authenticate with Spotify
+try:
+    logger.info("[Spotify] Authenticating via OAuth")
+    scope = 'playlist-read-collaborative playlist-read-private user-library-read'
+    auth_manager = SpotifyOAuth(client_id=os.environ['SPOTIFY_CLIENT_ID'],
+                                client_secret=os.environ['SPOTIFY_CLIENT_SECRET'],
+                                redirect_uri=os.environ['SPOTIFY_REDIRECT_URI'],
+                                username=os.environ['SPOTIFY_USERNAME'],
+                                scope=scope)
+    spotify = spotipy.Spotify(auth_manager=auth_manager)
+    spotify_user = spotify.current_user()
+except SpotifyException as e:
+    logger.error(
+        "[Spotify] Could not authenticate or retrive current user. Exiting...")
+    logger.error(e)
+    exit(1)
 
-playlist_cursor = spotify.current_user_playlists()
+# Fetch current user's playlists
 playlists = []
-while playlist_cursor:
-    for i, playlist_item in enumerate(playlist_cursor['items']):
-        playlists.append(Playlist(playlist_item))
-    if playlist_cursor['next']:
-        playlist_cursor = spotify.next(playlist_cursor)
-    else:
-        playlist_cursor = None
+for playlist_page in paginated(lambda: spotify.current_user_playlists(), next_page=spotify.next):
+    playlists += [Playlist(playlist_item)
+                  for playlist_item in playlist_page['items']]
 
-# Download saved playlists
+# Fetch tracks for playlists
 for playlist in playlists:
-    print(f"[Spotify] Downloading {playlist.name} by {playlist.owner}")
-    track_cursor = spotify.playlist_tracks(playlist.id)
-    while track_cursor:
-        try:
-            for i, track_item in enumerate(track_cursor['items']):
-                playlist.tracks.append(track_item['track'])
-        except:
-            e = sys.exc_info()[0]
-            print(f"[Spotify] Could not download. Error: {e}")
+    logger.info(f"[Spotify] Fetching {playlist.name} by {playlist.owner}")
+    for track_page in paginated(lambda: spotify.playlist_tracks(playlist.id), next_page=spotify.next):
+        for track_item in track_page['items']:
+            track = track_item['track']
+            playlist.tracks.append(track)
+            logger.debug(f"\tAdding:  {track['id']} - {track['name']}")
 
-        if track_cursor['next']:
-            track_cursor = spotify.next(track_cursor)
-        else:
-            track_cursor = None
-
-# Download "Liked Songs" playlist
-spotify_user = spotify.current_user()
+# Fetch tracks saved in "Liked Songs" playlist
 personal_playlist = Playlist(
     {'id': spotify_user['id'], 'name': 'Liked Songs', 'owner': spotify_user})
-print(f"[Spotify] Downloading {personal_playlist.name}")
-track_cursor = spotify.current_user_saved_tracks()
-while track_cursor:
-    try:
-        for i, track_item in enumerate(track_cursor['items']):
-            personal_playlist.tracks.append(track_item['track'])
-    except:
-        e = sys.exc_info()[0]
-        print(f"[Spotify] Could not download. Error: {e}")
+logger.info(f"[Spotify] Downloading {personal_playlist.name}")
 
-    if track_cursor['next']:
-        track_cursor = spotify.next(track_cursor)
-    else:
-        track_cursor = None
+for track_page in paginated(lambda: spotify.current_user_saved_tracks(), next_page=spotify.next):
+    for track_item in track_page['items']:
+        personal_playlist.tracks.append(track_item['track'])
 
 playlists.append(personal_playlist)
 
+# Log playlist tracks and diff changes
 for playlist in playlists:
     logfile_dir = playlist.logfile(path=repo_dir)
-    print(f"[Spotify] Logging {playlist.name} at {logfile_dir}")
-    logfile = open(logfile_dir, 'w')
-    logfile.write(playlist.log_header())
-    logfile.write("\n\n")
+    logger.info(f"[Spotify] Diffing {playlist.name} at {logfile_dir}")
 
-    for logline in playlist.log_tracks():
-        logfile.write(logline)
-        # print(f'{logline}')
-        logfile.write("\n")
-    # print()
+    with open(logfile_dir, 'w') as logfile:
+        logger.debug(playlist.log_header()+"\n")
+        logfile.write(playlist.log_header())
+        logfile.write("\n\n")
 
-    logfile.close()
+        for logline in playlist.log_tracks():
+            logger.debug(logline)
+            logfile.write(logline)
+            logfile.write("\n")
+
+        logger.debug("")
+
     repo.index.add([logfile_dir])
 
 if not repo.index.diff(repo.head.commit):
-    print(f'[Git] No change in playlists. Exiting...')
+    logger.warning('[Git] No change in playlists. Exiting...')
     exit(0)
 
 repo.index.commit(log_batch_id)
 repo.git.push(origin, repo.heads[log_batch_id])
 
+# Open a PR against Github
 try:
-    print(f"[Github] Opening PR and merging: {log_batch_id}")
+    logger.info(f"[Github] Opening PR and merging: {log_batch_id}")
     github = Github(os.environ['GITHUB_ACCESS_TOKEN'])
     guser = github.get_user()
     repo = github.get_repo(os.environ['GITHUB_PLAYLIST_REPO_ID'])
 
-    open_prs = repo.get_pulls(state='open', base='master', head=log_batch_id)
+    open_prs = repo.get_pulls(
+        state='open', base='master', head=log_batch_id)
     if open_prs.totalCount > 0:
-        print(f'[Github] PR {log_batch_id} already exists. Merging...')
+        logger.warning(
+            f'[Github] PR {log_batch_id} already exists. Merging...')
         pr = open_prs[0]
     else:
         pr = repo.create_pull(title=log_batch_id, body=log_batch_id,
                               base='master', head=log_batch_id)
     pr.merge()
 except GithubException as e:
-    print(f"[Github] Could not open PR. Error: {e}")
+    logger.error(f"[Github] Could not open PR.")
+    logger.error(e)
