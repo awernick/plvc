@@ -15,6 +15,10 @@ class Playlist(object):
     def name(self):
         return self.playlist_obj['name']
 
+    @property
+    def owner(self):
+        return self.playlist_obj['owner']['id']
+
     def logfile(self, path=""):
         name = snakecase(alphanumcase(self.name))
         uid = self.id
@@ -23,7 +27,7 @@ class Playlist(object):
     def log_header(self):
         id = self.id
         name = self.name
-        owner = self.playlist_obj['owner']['id']
+        owner = self.owner
         return f"{id} - {name} by {owner}"
 
     def log_tracks(self):
