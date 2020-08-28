@@ -13,6 +13,7 @@ Plvc was created with two goals in mind:
 ## How Does It Work?
 
 There are three components to plvc:
+
     - Spotify API
     - Git repos
     - Github PR API
@@ -40,6 +41,7 @@ history.git - repo containing playlist text files and history
 ```
 
 When running plvc, the following steps will occur:
+
     1. Pull the latest master from origin in our `history.git` repo
     2. Create a temporary branch from master. Branch name will be the current timestamp e.g `Aug-28-2020-12-23-05`
     3. Using the Spotify API, generate a playlist text file containing all the track metadata
@@ -117,6 +119,7 @@ Since we are pushing / pulling from a remote origin, make sure that the user exc
 ### 3. Why are PRs not being created in my Github repository?
 
 Make sure that the Github access token you are using with plvc has the following permissions:
+
 
 
 ## Additional Setup
