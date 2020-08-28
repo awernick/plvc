@@ -3,6 +3,7 @@ import sys
 import json
 import spotipy
 import logging
+import sentry_sdk
 from datetime import datetime
 from dotenv import load_dotenv
 from git import Repo
@@ -11,6 +12,15 @@ from spotipy.oauth2 import SpotifyOAuth
 from spotipy.exceptions import SpotifyException
 from util import paginated, Playlist
 
+# Load from .env
+load_dotenv()
+
+# Setup Sentry reporting
+sentry_sdk.init(
+    os.environ['SENTRY_DSN'],
+    traces_sample_rate=1.0
+)
+
 # Setup logging levels
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.DEBUG)
@@ -18,8 +28,6 @@ logger = logging.getLogger(__name__)
 logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
-# Load from .env
-load_dotenv()
 
 # Setup local repo from CWD
 repo_dir = os.environ['PLAYLIST_REPO_DIR']
@@ -149,6 +157,7 @@ repo.git.push(origin, repo.heads[log_batch_id])
 # Open a PR against Github
 try:
     logger.info(f"[Github] Opening PR and merging: {log_batch_id}")
+
     github = Github(os.environ['GITHUB_ACCESS_TOKEN'])
     guser = github.get_user()
     repo = github.get_repo(os.environ['GITHUB_PLAYLIST_REPO_ID'])
@@ -167,4 +176,3 @@ except GithubException as e:
     logger.error(f"[Github] Could not open PR.")
     logger.error(e)
     exit(1)
-
