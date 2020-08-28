@@ -70,33 +70,35 @@ repo.heads[log_batch_id].checkout()
 logger.info("[Spotify] Authenticating via OAuth")
 
 # Fetch access token and cache it for reuse
-if not os.path.exists('token-info.json'):
-    try:
-        scope = 'playlist-read-collaborative playlist-read-private user-library-read'
-        auth_manager = SpotifyOAuth(client_id=os.environ['SPOTIFY_CLIENT_ID'],
-                                    client_secret=os.environ['SPOTIFY_CLIENT_SECRET'],
-                                    redirect_uri=os.environ['SPOTIFY_REDIRECT_URI'],
-                                    username=os.environ['SPOTIFY_USERNAME'],
-                                    scope=scope)
+scope = 'playlist-read-collaborative playlist-read-private user-library-read'
+auth_manager = SpotifyOAuth(client_id=os.environ['SPOTIFY_CLIENT_ID'],
+                            client_secret=os.environ['SPOTIFY_CLIENT_SECRET'],
+                            redirect_uri=os.environ['SPOTIFY_REDIRECT_URI'],
+                            username=os.environ['SPOTIFY_USERNAME'],
+                            scope=scope)
+
+try:
+    token_info = None
+
+    # Refresh access token if we've saved it previously
+    if os.path.exists('token-info.json'):
+        with open('token-info.json', 'r') as f:
+            old_token_info = json.load(f)
+            token_info = auth_manager.refresh_access_token(
+                old_token_info['refresh_token'])
+    else:
         token_info = auth_manager.get_access_token()
 
-        with open('token-info.json', 'w') as f:
-            json.dump(token_info, f)
+    with open('token-info.json', 'w') as f:
+        json.dump(token_info, f)
 
-    except SpotifyException as e:
-        logger.error("[Spotify] Could not get access token.")
-        logger.error(e)
-        exit(1)
-
-# Login and attempt to fetch current user
-try:
-    with open('token-info.json', 'r') as f:
-        token_info = json.load(f)
-        spotify = spotipy.Spotify(token_info['access_token'])
-        spotify_user = spotify.current_user()
+    # Login and attempt to fetch current user
+    spotify = spotipy.Spotify(token_info['access_token'])
+    spotify_user = spotify.current_user()
 
 except SpotifyException as e:
-    logger.error("[Spotify] Could not get retrive current user.")
+    logger.error(
+        "[Spotify] Could not retrieve auth token or current user info.")
     logger.error(e)
     exit(1)
 
