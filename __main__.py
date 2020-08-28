@@ -3,7 +3,7 @@ import sys
 import json
 import spotipy
 import logging
-from datetime import date
+from datetime import datetime
 from dotenv import load_dotenv
 from git import Repo
 from github import Github, GithubException
@@ -11,6 +11,7 @@ from spotipy.oauth2 import SpotifyOAuth
 from spotipy.exceptions import SpotifyException
 from util import paginated, Playlist
 
+# Setup logging levels
 handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -51,8 +52,8 @@ else:
 
 origin.pull()
 
-today = date.today()
-log_batch_id = today.strftime("%b-%d-%Y")
+# Create working branch using today's date and time
+log_batch_id = datetime.now().strftime("%b-%d-%Y-%H-%M-%S")
 if log_batch_id not in origin.refs:
     repo.create_head(log_batch_id)
 repo.heads[log_batch_id].checkout()
@@ -60,6 +61,7 @@ repo.heads[log_batch_id].checkout()
 # Authenticate with Spotify
 logger.info("[Spotify] Authenticating via OAuth")
 
+# Fetch access token and cache it for reuse
 if not os.path.exists('token-info.json'):
     try:
         scope = 'playlist-read-collaborative playlist-read-private user-library-read'
@@ -78,6 +80,7 @@ if not os.path.exists('token-info.json'):
         logger.error(e)
         exit(1)
 
+# Login and attempt to fetch current user
 try:
     with open('token-info.json', 'r') as f:
         token_info = json.load(f)
@@ -139,6 +142,7 @@ if not repo.index.diff(repo.head.commit):
     logger.warning('[Git] No change in playlists. Exiting...')
     exit(0)
 
+# Create commit and push to origin
 repo.index.commit(log_batch_id)
 repo.git.push(origin, repo.heads[log_batch_id])
 
@@ -149,8 +153,7 @@ try:
     guser = github.get_user()
     repo = github.get_repo(os.environ['GITHUB_PLAYLIST_REPO_ID'])
 
-    open_prs = repo.get_pulls(
-        state='open', base='master', head=log_batch_id)
+    open_prs = repo.get_pulls(state='open', base='master', head=log_batch_id)
     if open_prs.totalCount > 0:
         logger.warning(
             f'[Github] PR {log_batch_id} already exists. Merging...')
@@ -159,6 +162,9 @@ try:
         pr = repo.create_pull(title=log_batch_id, body=log_batch_id,
                               base='master', head=log_batch_id)
     pr.merge()
+    logger.info("[Github] Merged PR")
 except GithubException as e:
     logger.error(f"[Github] Could not open PR.")
     logger.error(e)
+    exit(1)
+
