@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import spotipy
 import logging
 from datetime import date
@@ -57,21 +58,37 @@ if log_batch_id not in origin.refs:
 repo.heads[log_batch_id].checkout()
 
 # Authenticate with Spotify
+logger.info("[Spotify] Authenticating via OAuth")
+
+if not os.path.exists('token-info.json'):
+    try:
+        scope = 'playlist-read-collaborative playlist-read-private user-library-read'
+        auth_manager = SpotifyOAuth(client_id=os.environ['SPOTIFY_CLIENT_ID'],
+                                    client_secret=os.environ['SPOTIFY_CLIENT_SECRET'],
+                                    redirect_uri=os.environ['SPOTIFY_REDIRECT_URI'],
+                                    username=os.environ['SPOTIFY_USERNAME'],
+                                    scope=scope)
+        token_info = auth_manager.get_access_token()
+
+        with open('token-info.json', 'w') as f:
+            json.dump(token_info, f)
+
+    except SpotifyException as e:
+        logger.error("[Spotify] Could not get access token.")
+        logger.error(e)
+        exit(1)
+
 try:
-    logger.info("[Spotify] Authenticating via OAuth")
-    scope = 'playlist-read-collaborative playlist-read-private user-library-read'
-    auth_manager = SpotifyOAuth(client_id=os.environ['SPOTIFY_CLIENT_ID'],
-                                client_secret=os.environ['SPOTIFY_CLIENT_SECRET'],
-                                redirect_uri=os.environ['SPOTIFY_REDIRECT_URI'],
-                                username=os.environ['SPOTIFY_USERNAME'],
-                                scope=scope)
-    spotify = spotipy.Spotify(auth_manager=auth_manager)
-    spotify_user = spotify.current_user()
+    with open('token-info.json', 'r') as f:
+        token_info = json.load(f)
+        spotify = spotipy.Spotify(token_info['access_token'])
+        spotify_user = spotify.current_user()
+
 except SpotifyException as e:
-    logger.error(
-        "[Spotify] Could not authenticate or retrive current user. Exiting...")
+    logger.error("[Spotify] Could not get retrive current user.")
     logger.error(e)
     exit(1)
+
 
 # Fetch current user's playlists
 playlists = []
