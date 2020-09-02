@@ -162,19 +162,31 @@ try:
 
     github = Github(os.environ['GITHUB_ACCESS_TOKEN'])
     guser = github.get_user()
-    repo = github.get_repo(os.environ['GITHUB_PLAYLIST_REPO_ID'])
+    grepo = github.get_repo(os.environ['GITHUB_PLAYLIST_REPO_ID'])
 
-    open_prs = repo.get_pulls(state='open', base='master', head=log_batch_id)
+    open_prs = grepo.get_pulls(state='open', base='master', head=log_batch_id)
     if open_prs.totalCount > 0:
         logger.warning(
             f'[Github] PR {log_batch_id} already exists. Merging...')
         pr = open_prs[0]
     else:
-        pr = repo.create_pull(title=log_batch_id, body=log_batch_id,
-                              base='master', head=log_batch_id)
+        pr = grepo.create_pull(title=log_batch_id, body=log_batch_id,
+                               base='master', head=log_batch_id)
     pr.merge()
     logger.info("[Github] Merged PR")
 except GithubException as e:
     logger.error(f"[Github] Could not open PR.")
+    logger.error(e)
+    exit(1)
+
+# Cleanup branches
+try:
+    logger.info("[Git] Cleaning up...")
+    repo.git.push(origin, repo.heads[log_batch_id], delete=True)
+    repo.heads.master.checkout()
+    origin.pull()
+    repo.delete_head(log_batch_id)
+except Exception as e:
+    logger.error(f"[Git] Could not delete local or remote branch")
     logger.error(e)
     exit(1)
