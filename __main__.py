@@ -114,6 +114,9 @@ for playlist in playlists:
     logger.info(f"[Spotify] Fetching {playlist.name} by {playlist.owner}")
     for track_page in paginated(lambda: spotify.playlist_tracks(playlist.id), next_page=spotify.next):
         for track_item in track_page['items']:
+            if 'track' not in track_item or not track_item['track']:
+                logger.warn("\tCould not grab track item. Skipping")
+                continue
             track = track_item['track']
             playlist.tracks.append(track)
             logger.debug(f"\tAdding:  {track['id']} - {track['name']}")
